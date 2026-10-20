@@ -21,6 +21,10 @@ Experience needed in total (levels 1 to 12 are the game's own values):
 | 15 | 175,000 |
 | 16 | 205,000 |
 
+## Screenshots
+
+![Level Unlocked cover](docs/cover.jpg)
+
 ## How to install
 
 1. Install [Norbyte's Script Extender](https://github.com/Norbyte/bg3se). It updates itself.

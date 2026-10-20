@@ -5,6 +5,7 @@
   "summary": "Raises the level cap from 12 to 16 and lets you set an experience multiplier in the Mod Configuration Menu.",
   "games": ["baldurs-gate-3"],
   "tags": ["gameplay"],
+  "cover": "docs/cover.jpg",
   "requires": ["Norbyte's Script Extender", "Mod Configuration Menu"],
   "gameVersions": ["Patch 8"]
 }
