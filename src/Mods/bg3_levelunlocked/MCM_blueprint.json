@@ -1,0 +1,30 @@
+{
+  "SchemaVersion": 1,
+  "ModName": "Level Unlocked",
+  "Tabs": [
+    {
+      "TabId": "general",
+      "TabName": "General",
+      "Sections": [
+        {
+          "SectionId": "experience",
+          "SectionName": "Experience",
+          "Settings": [
+            {
+              "Id": "xp_multiplier",
+              "Name": "Experience multiplier",
+              "Type": "slider_float",
+              "Default": 1.0,
+              "Options": {
+                "Min": 0.5,
+                "Max": 5.0,
+                "Step": 0.1
+              },
+              "Description": "Multiplies all experience your characters gain: 1.0 is the normal game, 2.0 is double, 0.5 is half. A change applies to the next experience you gain. The level cap is 16."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

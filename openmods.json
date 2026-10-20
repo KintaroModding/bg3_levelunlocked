@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openmods.nexus/openmods.schema.json",
+  "openmods": 1,
+  "name": "Level Unlocked",
+  "summary": "Raises the level cap from 12 to 16 and lets you set an experience multiplier in the Mod Configuration Menu.",
+  "games": ["baldurs-gate-3"],
+  "tags": ["gameplay"],
+  "requires": ["Norbyte's Script Extender", "Mod Configuration Menu"],
+  "gameVersions": ["Patch 8"]
+}
