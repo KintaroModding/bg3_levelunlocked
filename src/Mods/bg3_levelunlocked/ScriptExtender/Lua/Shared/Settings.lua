@@ -39,7 +39,9 @@ function Settings.Describe()
     local parts = {}
     for _, id in ipairs(ids) do
         local value, source = Settings.Get(id)
-        parts[#parts + 1] = id .. " = " .. tostring(value) .. " (" .. source .. ")"
+        -- %g: 5 and 1.5, not the "5." that the Script Extender's tostring gives for 5.0.
+        local text = type(value) == "number" and string.format("%g", value) or tostring(value)
+        parts[#parts + 1] = id .. " = " .. text .. " (" .. source .. ")"
     end
     return table.concat(parts, ", ")
 end

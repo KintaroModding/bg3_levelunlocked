@@ -18,7 +18,7 @@ end)
 Test("the session load logs the defaults", function()
     Ext.Events.SessionLoaded:Fire()
     Harness.RunTimers()
-    AssertTrue(string.find(Harness.Files["bg3_levelunlocked/server.log"] or "", "Settings: xp_multiplier = 1.0 (default).",
+    AssertTrue(string.find(Harness.Files["bg3_levelunlocked/server.log"] or "", "Settings: xp_multiplier = 1 (default).",
         1, true), "server.log line")
 end)
 

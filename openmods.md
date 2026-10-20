@@ -7,8 +7,9 @@ Raises the level cap from 12 to 16 and lets you set an experience multiplier in 
 - **Level cap 16.** Your characters can level up past 12, up to 16.
 - **Levels 13 to 16** give every class its hit points. Level 16 also gives a feat, as the 5e rules do for every class.
   There are no new class features or spell slots: the game has no spells above level 6.
-- **Experience multiplier** from 0.5x to 5x, in the Mod Configuration Menu. It changes every gain of experience the
-  game gives (combat, exploration, quests) before the game adds it, so level-ups work as usual.
+- **Experience multiplier** from 0.5x to 5x, in the Mod Configuration Menu. It multiplies every gain of experience
+  (combat, exploration, quests): right after a gain, the mod gives the difference, and the game does the level-ups as
+  usual.
 - The mod is a normal `.pak`: it replaces no game files.
 
 Experience needed in total (levels 1 to 12 are the game's own values):
@@ -75,3 +76,6 @@ The offline tests need Python 3 with lupa: `python -m pip install lupa`, then `p
 ## Credits
 
 Made by Kintaro. MIT license: you may use, change and share this mod.
+
+The way the multiplier works with the game's level-ups follows the game tests that
+[Path to Apotheosis](https://github.com/holypolarpanda7/dnd55e-13-20-Path-to-Apotheosis) by holypolarpanda7 published.

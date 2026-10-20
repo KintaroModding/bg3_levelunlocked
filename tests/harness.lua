@@ -929,48 +929,25 @@ function Harness.AudioCallsNamed(name)
     return calls
 end
 
+
 ---------------------------------------------------------------------------------------------------
--- ECS systems, component subscriptions and ExtraData (Level Unlocked)
+-- Experience: party characters, the Experience subscription, AddExplorationExperience, ExtraData (Level Unlocked)
 ---------------------------------------------------------------------------------------------------
 
--- Systems that Ext.Entity.OnSystemUpdate accepts; others raise "System <name> not registered", as the Script
--- Extender does. Ext.System.<name> is the system's data, set by the test.
-Harness.RegisteredSystems = {}
--- [system name] = { Pre = { fn, ... }, Post = { fn, ... } }
-Harness.SystemHooks = {}
+-- Ext.Stats.GetStatsManager().ExtraData; the XPData keys (Level1..., MaxXPLevel) drive the level model below.
+Harness.ExtraData = {}
+-- [uuid] = character entity made with Harness.Character; Ext.Entity.Get finds them.
+Harness.Entities = {}
+-- The party members in order; AddExplorationExperience gives to all of them when ExperienceReach is "party".
+Harness.Party = {}
+Harness.ExperienceReach = "party"
+-- Every AddExplorationExperience call: { Uuid, Amount }.
+Harness.ExperienceCalls = {}
 -- [component name] = { fn, ... }
 Harness.ComponentSubscriptions = {}
--- Ext.Stats.GetStatsManager().ExtraData
-Harness.ExtraData = {}
 
-Ext.System = {}
-
-local function SystemHooks(name)
-    if not Harness.RegisteredSystems[name] then
-        error("System " .. tostring(name) .. " not registered", 3)
-    end
-    local hooks = Harness.SystemHooks[name]
-    if hooks == nil then
-        hooks = { Pre = {}, Post = {} }
-        Harness.SystemHooks[name] = hooks
-    end
-    return hooks
-end
-
-Ext.Entity.OnSystemUpdate = function(name, fn, once)
-    assert(type(fn) == "function", "OnSystemUpdate needs a function")
-    assert(not once, "once is not modelled")
-    local list = SystemHooks(name).Pre
-    list[#list + 1] = fn
-    return #list
-end
-
-Ext.Entity.OnSystemPostUpdate = function(name, fn, once)
-    assert(type(fn) == "function", "OnSystemPostUpdate needs a function")
-    assert(not once, "once is not modelled")
-    local list = SystemHooks(name).Post
-    list[#list + 1] = fn
-    return #list
+Ext.Stats.GetStatsManager = function()
+    return { ExtraData = Harness.ExtraData }
 end
 
 -- Only the form for all entities: Subscribe(component, fn).
@@ -983,30 +960,25 @@ Ext.Entity.Subscribe = function(component, fn, entity, flags)
     return #list
 end
 
-Ext.Stats.GetStatsManager = function()
-    return { ExtraData = Harness.ExtraData }
+local getEntity = Ext.Entity.Get
+Ext.Entity.Get = function(uuid)
+    return Harness.Entities[uuid] or getEntity(uuid)
 end
 
--- Test entities are tables with a numeric Handle.
-Ext.Utils = {
-    HandleToInteger = function(entity)
-        assert(type(entity) == "table" and entity.Handle ~= nil, "HandleToInteger needs an entity")
-        return entity.Handle
-    end,
-}
-
---- Runs one update of a system: the hooks before it, update() (what the game does), then the hooks after it.
-function Harness.RunSystemUpdate(name, update)
-    local hooks = Harness.SystemHooks[name] or { Pre = {}, Post = {} }
-    for _, fn in ipairs(hooks.Pre) do
-        fn()
+local getAllWithComponent = Ext.Entity.GetAllEntitiesWithComponent
+Ext.Entity.GetAllEntitiesWithComponent = function(name)
+    local result = getAllWithComponent(name)
+    local uuids = {}
+    for uuid, entity in pairs(Harness.Entities) do
+        if entity[name] ~= nil then
+            uuids[#uuids + 1] = uuid
+        end
     end
-    if update ~= nil then
-        update()
+    table.sort(uuids)
+    for _, uuid in ipairs(uuids) do
+        result[#result + 1] = Harness.Entities[uuid]
     end
-    for _, fn in ipairs(hooks.Post) do
-        fn()
-    end
+    return result
 end
 
 --- Calls the subscribers of a component, as the game does after a change of it on an entity.
@@ -1016,18 +988,94 @@ function Harness.FireComponentChange(component, entity)
     end
 end
 
---- Returns a test character entity: { Handle, DisplayName, Uuid, Experience, EocLevel, AvailableLevel, PartyMember }.
+--- Returns the level that a total reaches with the XPData keys in Harness.ExtraData.
+function Harness.LevelForTotal(total)
+    local data = Harness.ExtraData
+    local start, level = 0, 1
+    for next = 2, math.floor(data.MaxXPLevel or 12) do
+        start = start + (data["Level" .. (next - 1)] or 0)
+        if total < start then
+            break
+        end
+        level = next
+    end
+    return level
+end
+
+--- Adds experience as the game does: the total changes; a gain flags every level it reaches (AvailableLevel and the
+--- CanLevelUp component); a loss checks nothing (Path to Apotheosis, docs/XP_CURVE.md). Then the subscribers run.
+function Harness.AddExperience(entity, amount)
+    entity.Experience.TotalExperience = entity.Experience.TotalExperience + amount
+    if amount > 0 then
+        local reached = Harness.LevelForTotal(entity.Experience.TotalExperience)
+        if reached > entity.AvailableLevel.Level then
+            entity.AvailableLevel.Level = reached
+            entity.Experience.CurrentLevelExperience = 0
+        end
+        if entity.AvailableLevel.Level > entity.EocLevel.Level then
+            entity.CanLevelUp = entity.CanLevelUp or {}
+        end
+    end
+    Harness.FireComponentChange("Experience", entity)
+end
+
+--- A gain of the game itself: every party member gets it at once.
+function Harness.PartyGain(amount)
+    for _, entity in ipairs(Harness.Party) do
+        Harness.AddExperience(entity, amount)
+    end
+end
+
+-- The game applies AddExplorationExperience at the next tick.
+local pendingExperience = {}
+Osi.AddExplorationExperience = function(uuid, amount)
+    assert(Harness.Entities[uuid], "AddExplorationExperience: unknown character " .. tostring(uuid))
+    assert(math.type(amount) == "integer", "AddExplorationExperience needs an integer")
+    Harness.ExperienceCalls[#Harness.ExperienceCalls + 1] = { Uuid = uuid, Amount = amount }
+    pendingExperience[#pendingExperience + 1] = { Uuid = uuid, Amount = amount }
+end
+
+-- Subscribed before any mod script, so the game's step runs first in each tick.
+Ext.Events.Tick:Subscribe(function()
+    local queue = pendingExperience
+    pendingExperience = {}
+    for _, call in ipairs(queue) do
+        local targets = Harness.ExperienceReach == "party" and Harness.Party or { Harness.Entities[call.Uuid] }
+        for _, entity in ipairs(targets) do
+            Harness.AddExperience(entity, call.Amount)
+        end
+    end
+end)
+
+--- Returns a party character (or with Party = false another character) and registers it for Ext.Entity.Get.
+--- Options: Experience, Level, Party. Replicate, CreateComponent and RemoveComponent are recorded in Replicated.
 local entityHandles = 1000
 function Harness.Character(name, uuid, options)
     options = options or {}
     entityHandles = entityHandles + 1
-    return {
+    local level = options.Level or Harness.LevelForTotal(options.Experience or 0)
+    local entity = {
         Handle = entityHandles,
         DisplayName = { Name = { Get = function() return name end } },
         Uuid = { EntityUuid = uuid },
-        Experience = { TotalExperience = options.Experience or 0 },
-        EocLevel = { Level = options.Level or 1 },
-        AvailableLevel = { Level = options.Level or 1 },
+        Experience = { TotalExperience = options.Experience or 0, CurrentLevelExperience = 0 },
+        EocLevel = { Level = level },
+        AvailableLevel = { Level = level },
         PartyMember = options.Party ~= false and {} or nil,
+        Replicated = {},
     }
+    function entity:Replicate(component)
+        self.Replicated[#self.Replicated + 1] = component
+    end
+    function entity:CreateComponent(component)
+        self[component] = {}
+    end
+    function entity:RemoveComponent(component)
+        self[component] = nil
+    end
+    Harness.Entities[uuid] = entity
+    if entity.PartyMember then
+        Harness.Party[#Harness.Party + 1] = entity
+    end
+    return entity
 end

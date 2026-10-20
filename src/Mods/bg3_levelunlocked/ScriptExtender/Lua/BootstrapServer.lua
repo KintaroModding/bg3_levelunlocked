@@ -44,6 +44,9 @@ end)
 
 Ext.Osiris.RegisterListener("LevelGameplayStarted", 2, "after", function()
     StartHooks("LevelGameplayStarted")
+    if hooksReady then
+        XPMultiplier.ReadParty()
+    end
 end)
 
 -- In multiplayer, the host's server holds the values that count. The multiplier reads the setting at every gain.

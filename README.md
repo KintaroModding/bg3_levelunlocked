@@ -16,16 +16,23 @@ does, how to install it and its compatibility are in [openmods.md](openmods.md),
   with its own; another mod that sets the same keys and loads later wins.
 - Class levels 13 to 16: the game's class progression tables end at level 12.
   `Public/bg3_levelunlocked/Progressions/Progressions.lsx` adds one row per class and level in the class's own
-  table: empty rows for 13 to 15
-  (hit points only; the game has empty rows itself) and a feat (`AllowImprovement`) at 16. The multiclass spell slot
-  table gets empty rows too. Subclass tables need none: they only have rows where the subclass gives something.
-  `scripts/gen_progressions.py` writes the file.
-- Experience multiplier: `Server/XPMultiplier.lua` hooks the server's experience system
-  (`Ext.Entity.OnSystemUpdate("ServerExperience", ...)`). Before each update it multiplies every pending amount in
-  `Ext.System.ServerExperience.IncreaseExperience` (character -> amount), so the game adds the scaled amount and
-  checks the level-up itself. A gain that stays in the map for another update is not scaled again.
-  `Server/ExperienceWatch.lua` logs every change of a party member's experience (`Ext.Entity.Subscribe`).
-- The hooks start on `SessionLoaded`, or on `LevelGameplayStarted` when the system does not exist yet.
+  table: empty rows for 13 to 15 (hit points only; the game has empty rows itself) and a feat (`AllowImprovement`)
+  at 16. The multiclass spell slot table gets empty rows too. Subclass tables need none: they only have rows where
+  the subclass gives something. `scripts/gen_progressions.py` writes the file.
+- Experience multiplier: `Server/XPMultiplier.lua` watches the `Experience` component of the party members
+  (`Ext.Entity.Subscribe`). The game gives each member the gain; after a short wait to collect the gains of one
+  event, the mod adds the difference to the scaled gain with `Osi.AddExplorationExperience`, so the game adds it and
+  checks the level-up itself. Whether that call gives to one character or to the whole party is not documented: the
+  mod corrects one member first, waits until the game applied it, and then corrects only the members it did not
+  reach. Below 1 the correction is negative; the game has already flagged a level-up for the full gain and never
+  checks again, so the mod rebuilds `AvailableLevel`, `CurrentLevelExperience` and the `CanLevelUp` component from
+  the corrected total. These engine facts come from the game tests that
+  [Path to Apotheosis](https://github.com/holypolarpanda7/dnd55e-13-20-Path-to-Apotheosis) published
+  (`docs/XP_CURVE.md`). A hook before the update of the server's experience system
+  (`Ext.Entity.OnSystemUpdate("ServerExperience")`) saw no pending gains in a game test, so the mod corrects after
+  the fact.
+- `Server/ExperienceWatch.lua` logs every change of a party member's experience.
+- The hooks start on `SessionLoaded`, or on `LevelGameplayStarted` when that fails.
 
 ## Settings
 
@@ -66,7 +73,7 @@ src/                                     Mod files (packed into the .pak)
     Lua/Shared/Common.lua                Shared helpers (mod version)
     Lua/Shared/FileWriter.lua            Throttled file output in the Script Extender folder
     Lua/Shared/Settings.lua              MCM settings with defaults (Settings.Defaults)
-    Lua/Server/XPMultiplier.lua          Scales the pending experience gains
+    Lua/Server/XPMultiplier.lua          Multiplies the experience gains of the party
     Lua/Server/ExperienceWatch.lua       Logs the experience of party members
     Lua/Server/LevelCap.lua              Reads and checks the level cap the game uses
     Lua/Server/ServerLog.lua             server.log
@@ -96,7 +103,7 @@ Logs: the mod writes `server.log` and `client.log` to
 `Level Unlocked 1.0.0.1 loaded.`, so the logs show which version runs, and server.log gets a line with every setting,
 for example `Settings: xp_multiplier = 1.5 (MCM).`, also after each change. It also shows the level data the game
 uses (`Level data: MaxXPLevel = 16, ...`), whether the experience hooks started, every scaled gain
-(`Experience for Tav: 100 -> 150 (x1.5).`) and every change of a party member's experience. MCM stores the settings in
+(`Gain x1.5: Tav +100 -> +150.`) and every change of a party member's experience. MCM stores the settings in
 `Script Extender\BG3MCM\Profiles\<Profile>\bg3_levelunlocked\settings.json`. `python scripts\show_log.py` prints the
 newest log lines and these settings (from `BG3_DATA_DIR`, if set).
 

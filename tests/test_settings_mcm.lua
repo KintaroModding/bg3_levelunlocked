@@ -29,7 +29,7 @@ Test("a saved setting of this mod reaches OnChange with its id", function()
     Harness.FireMCMSettingSaved("xp_multiplier", 2.0)
     AssertEq(changes[#changes], "xp_multiplier", "setting id")
     AssertEq(Settings.Get("xp_multiplier"), 2.0, "new value")
-    AssertTrue(string.find(ServerLog(), "Setting changed (xp_multiplier): xp_multiplier = 2.0 (MCM).", 1, true),
+    AssertTrue(string.find(ServerLog(), "Setting changed (xp_multiplier): xp_multiplier = 2 (MCM).", 1, true),
         "server.log line")
 end)
 
