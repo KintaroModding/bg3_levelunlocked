@@ -1,6 +1,6 @@
--- The experience multiplier corrects each gain of the party after the game added it: one member (the lead) first,
--- then the members that the lead's correction did not reach. The harness models both ways AddExplorationExperience
--- can work (Harness.ExperienceReach). The experience log reports every change of a party member's experience.
+-- The experience multiplier corrects each gain of the party after the game added it: every member in the same tick,
+-- with one AddExplorationExperience call each. The experience log reports every change of a party member's
+-- experience.
 
 Harness.Mods[ModuleUUID] = { Info = { ModVersion = { 1, 0, 0, 0 } } }
 Harness.InstallMCM({ xp_multiplier = 5.0 })
@@ -84,28 +84,26 @@ Test("a later LevelGameplayStarted does not hook twice", function()
     AssertEq(#Harness.ComponentSubscriptions.Experience, 2, "still two subscriptions")
 end)
 
-Test("x5 when AddExplorationExperience reaches the whole party: one call", function()
-    Harness.ExperienceReach = "party"
+Test("x5: every member gets the difference, all in the same tick", function()
     Harness.PartyGain(20)
     Harness.RunTicks(20)
     AssertTotals({ 2793, 2773, 2728, 2793 }, "every member +100")
-    AssertEq(CallCount(), 1, "one call")
-    AssertEq(Harness.ExperienceCalls[1].Uuid, urge.Uuid.EntityUuid, "the lead")
-    AssertEq(Harness.ExperienceCalls[1].Amount, 80, "the difference")
+    AssertEq(CallCount(), 4, "one call per member")
+    for _, call in ipairs(Harness.ExperienceCalls) do
+        AssertEq(call.Amount, 80, "the difference")
+        AssertEq(call.Tick, Harness.ExperienceCalls[1].Tick, "the same tick, so the game shows one line")
+    end
     AssertTrue(Contains("Gain x5: Dark_Urge +20 -> +100, Shadowheart +20 -> +100, Astarion +20 -> +100, "
         .. "Gale +20 -> +100."), "gain line")
-    AssertTrue(Contains("AddExplorationExperience reaches the whole party."), "reach line")
     AssertTrue(Contains("Experience of Gale: 2713, level 3, can reach 4."), "the log's first look, after the game's gain")
     AssertTrue(Contains("Experience of Gale: 2713 -> 2793 (+80)"), "the correction in the log")
 end)
 
-Test("x5 when AddExplorationExperience reaches only the named character: one call per member", function()
-    Harness.ExperienceReach = "character"
+Test("a second gain of the game is multiplied too", function()
     Harness.PartyGain(10)
     Harness.RunTicks(30)
     AssertTotals({ 2843, 2823, 2778, 2843 }, "every member +50")
-    AssertEq(CallCount(), 5, "the lead and three more")
-    AssertTrue(Contains("AddExplorationExperience reaches only the character it names."), "reach line")
+    AssertEq(CallCount(), 8, "four more calls")
 end)
 
 Test("nothing more happens without a gain", function()
@@ -115,8 +113,7 @@ Test("nothing more happens without a gain", function()
     AssertTotals({ 2843, 2823, 2778, 2843 }, "no change")
 end)
 
-Test("two gains in a row are both multiplied", function()
-    Harness.ExperienceReach = "party"
+Test("a gain while the corrections are on their way is multiplied too", function()
     Harness.PartyGain(10)
     Harness.RunTicks(4)
     Harness.PartyGain(10)
@@ -155,6 +152,25 @@ Test("a member who joins with the party's experience is not multiplied", functio
     AssertEq(karlach.Experience.TotalExperience, 3123, "unchanged")
 end)
 
+Test("a correction that arrives late is waited for and not multiplied again", function()
+    Harness.FireMCMSettingSaved("xp_multiplier", 2.0)
+    Harness.ExperienceDelay = 25
+    Harness.PartyGain(10)
+    Harness.RunTicks(60)
+    Harness.ExperienceDelay = 1
+    AssertTotals({ 3143, 3123, 3078, 3143 }, "every member +20")
+    AssertTrue(not Contains("did not arrive in time"), "no late line")
+end)
+
+Test("a correction that never arrives is logged", function()
+    Harness.ExperienceDelay = 1000
+    Harness.PartyGain(10)
+    Harness.RunTicks(100)
+    Harness.ExperienceDelay = 1
+    AssertTrue(Contains("The correction for Dark_Urge did not arrive in time."), "late line")
+    AssertTotals({ 3153, 3133, 3088, 3153 }, "only the game's gain so far")
+end)
+
 Test("a failing AddExplorationExperience is logged and stops nothing", function()
     local original = Osi.AddExplorationExperience
     Osi.AddExplorationExperience = function() error("not now") end
@@ -164,5 +180,5 @@ Test("a failing AddExplorationExperience is logged and stops nothing", function(
     AssertTrue(Contains("AddExplorationExperience failed for Dark_Urge: "), "error line")
     Harness.PartyGain(10)
     Harness.RunTicks(20)
-    AssertEq(urge.Experience.TotalExperience, 3123 + 10 + 20, "the next gain works")
+    AssertEq(urge.Experience.TotalExperience, 3153 + 10 + 20, "the next gain works")
 end)

@@ -22,9 +22,10 @@ does, how to install it and its compatibility are in [openmods.md](openmods.md),
 - Experience multiplier: `Server/XPMultiplier.lua` watches the `Experience` component of the party members
   (`Ext.Entity.Subscribe`). The game gives each member the gain; after a short wait to collect the gains of one
   event, the mod adds the difference to the scaled gain with `Osi.AddExplorationExperience`, so the game adds it and
-  checks the level-up itself. Whether that call gives to one character or to the whole party is not documented: the
-  mod corrects one member first, waits until the game applied it, and then corrects only the members it did not
-  reach. Below 1 the correction is negative; the game has already flagged a level-up for the full gain and never
+  checks the level-up itself. The call gives only to the character it names (game test), so every member gets its
+  own call, all in the same tick: the game's combat log then shows one line, "The party gained N experience". The
+  mod reads no new gains until the corrections arrived. Below 1 the correction is negative; the game has already
+  flagged a level-up for the full gain and never
   checks again, so the mod rebuilds `AvailableLevel`, `CurrentLevelExperience` and the `CanLevelUp` component from
   the corrected total. These engine facts come from the game tests that
   [Path to Apotheosis](https://github.com/holypolarpanda7/dnd55e-13-20-Path-to-Apotheosis) published

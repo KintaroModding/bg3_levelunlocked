@@ -938,11 +938,15 @@ end
 Harness.ExtraData = {}
 -- [uuid] = character entity made with Harness.Character; Ext.Entity.Get finds them.
 Harness.Entities = {}
--- The party members in order; AddExplorationExperience gives to all of them when ExperienceReach is "party".
+-- The party members in order: a gain of the game reaches all of them (Harness.PartyGain).
 Harness.Party = {}
-Harness.ExperienceReach = "party"
--- Every AddExplorationExperience call: { Uuid, Amount }.
+-- AddExplorationExperience gives only to the character it names (game test, 2026-10-20). The game applies it
+-- ExperienceDelay ticks later.
+Harness.ExperienceDelay = 1
+-- Every AddExplorationExperience call: { Uuid, Amount, Tick }.
 Harness.ExperienceCalls = {}
+-- Ticks run so far.
+Harness.TickNumber = 0
 -- [component name] = { fn, ... }
 Harness.ComponentSubscriptions = {}
 
@@ -1026,25 +1030,27 @@ function Harness.PartyGain(amount)
     end
 end
 
--- The game applies AddExplorationExperience at the next tick.
 local pendingExperience = {}
 Osi.AddExplorationExperience = function(uuid, amount)
     assert(Harness.Entities[uuid], "AddExplorationExperience: unknown character " .. tostring(uuid))
     assert(math.type(amount) == "integer", "AddExplorationExperience needs an integer")
-    Harness.ExperienceCalls[#Harness.ExperienceCalls + 1] = { Uuid = uuid, Amount = amount }
-    pendingExperience[#pendingExperience + 1] = { Uuid = uuid, Amount = amount }
+    Harness.ExperienceCalls[#Harness.ExperienceCalls + 1] = { Uuid = uuid, Amount = amount, Tick = Harness.TickNumber }
+    pendingExperience[#pendingExperience + 1] = { Uuid = uuid, Amount = amount,
+        Due = Harness.TickNumber + Harness.ExperienceDelay }
 end
 
 -- Subscribed before any mod script, so the game's step runs first in each tick.
 Ext.Events.Tick:Subscribe(function()
-    local queue = pendingExperience
-    pendingExperience = {}
-    for _, call in ipairs(queue) do
-        local targets = Harness.ExperienceReach == "party" and Harness.Party or { Harness.Entities[call.Uuid] }
-        for _, entity in ipairs(targets) do
-            Harness.AddExperience(entity, call.Amount)
+    Harness.TickNumber = Harness.TickNumber + 1
+    local waiting = {}
+    for _, call in ipairs(pendingExperience) do
+        if call.Due <= Harness.TickNumber then
+            Harness.AddExperience(Harness.Entities[call.Uuid], call.Amount)
+        else
+            waiting[#waiting + 1] = call
         end
     end
+    pendingExperience = waiting
 end)
 
 --- Returns a party character (or with Party = false another character) and registers it for Ext.Entity.Get.

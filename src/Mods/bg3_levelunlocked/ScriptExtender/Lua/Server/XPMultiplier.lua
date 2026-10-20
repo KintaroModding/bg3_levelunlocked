@@ -3,9 +3,9 @@
 -- watches the Experience component of the party members and corrects each gain afterwards with
 -- Osi.AddExplorationExperience: the game adds the difference and checks the level-up itself.
 --
--- A gain reaches every party member at once. It is not documented whether AddExplorationExperience gives to one
--- character or to the whole party, so the mod corrects one member first (the lead), waits until the game applied it,
--- then checks every other member: who got the lead's correction is done, the others get their own.
+-- The game gives a gain to every party member separately, and AddExplorationExperience gives only to the character it
+-- names (game test of 2026-10-20). The mod corrects all members in the same tick, so the game's combat log shows one
+-- line, "The party gained N experience". Then it waits until the corrections arrived before it reads new gains.
 --
 -- Below 1 the correction is negative. The game flags a level-up when experience is added and never checks again, so
 -- the level state is rebuilt from the corrected total afterwards (AvailableLevel, CurrentLevelExperience, CanLevelUp).
@@ -17,11 +17,13 @@ XPMultiplier.MinFactor = 0.5
 XPMultiplier.MaxFactor = 5.0
 -- Ticks to collect the gains of one event: the game changes the party members one after the other.
 XPMultiplier.CollectTicks = 2
--- Ticks between a correction and the check of what it did: the game applies AddExplorationExperience a moment later.
-XPMultiplier.SettleTicks = 5
+-- Ticks between the corrections and the check that they arrived: the game applies AddExplorationExperience later.
+XPMultiplier.SettleTicks = 10
+-- How often the check waits again for a correction that has not arrived yet.
+XPMultiplier.MaxWaits = 5
 
 --- Returns the factor for a setting value: clamped to MinFactor..MaxFactor and rounded to two decimals (the MCM slider
---- can give 1.5000001). A value that is not a number gives 1.
+--- sends values such as 4.098 while it is dragged). A value that is not a number gives 1.
 function XPMultiplier.Factor(value)
     if type(value) ~= "number" or value ~= value then
         return 1
@@ -93,14 +95,11 @@ local expected = {}
 local gains = {}
 -- Ticks left before the gains are corrected; nil when none wait.
 local collectTicks = nil
--- The correction in progress: { Lead = uuid, LeadDiff = n, Diffs = { [uuid] = n }, Ticks = n }.
-local batch = nil
--- Ticks left before new gains may be corrected, after corrections of single members.
-local settleTicks = 0
+-- The corrections on their way: { Diffs = { [uuid] = n }, Ticks = n, Waits = n }. While it is set, the mod reads no
+-- gains: the check at its end does.
+local pending = nil
 -- Characters whose level state must be rebuilt after a negative correction: { Uuids = { uuid, ... }, Ticks = n }.
 local rebuild = nil
--- How AddExplorationExperience behaved last: "party" or "character", for the log.
-local reach = nil
 
 local function Uuid(entity)
     local ok, uuid = pcall(function() return entity.Uuid.EntityUuid end)
@@ -131,12 +130,9 @@ local function AddExperience(uuid, amount)
     return ok
 end
 
-local function SetReach(value)
-    if reach ~= value then
-        reach = value
-        log(value == "party" and "AddExplorationExperience reaches the whole party."
-            or "AddExplorationExperience reaches only the character it names.")
-    end
+local function AddGain(uuid, amount)
+    gains[uuid] = (gains[uuid] or 0) + amount
+    collectTicks = collectTicks or XPMultiplier.CollectTicks
 end
 
 local function OnExperience(entity)
@@ -152,19 +148,17 @@ local function OnExperience(entity)
         expected[uuid] = total
         return
     end
-    -- While a correction settles, the check at its end reads the other members.
-    if batch ~= nil and uuid ~= batch.Lead then
+    if pending ~= nil then
         return
     end
     local delta = total - expected[uuid]
     expected[uuid] = total
     if delta > 0 then
-        gains[uuid] = (gains[uuid] or 0) + delta
-        collectTicks = collectTicks or XPMultiplier.CollectTicks
+        AddGain(uuid, delta)
     end
 end
 
---- Corrects the collected gains: the lead at once, the others when the lead's correction settled.
+--- Corrects the collected gains of every member in the same tick.
 local function CorrectGains()
     local factor = XPMultiplier.Factor(getFactor())
     local uuids = {}
@@ -172,79 +166,64 @@ local function CorrectGains()
         uuids[#uuids + 1] = uuid
     end
     table.sort(uuids)
-    local diffs = {}
-    local lead = nil
     local parts = {}
+    local diffs = {}
+    local any = false
     for _, uuid in ipairs(uuids) do
         local gain = gains[uuid]
         local scaled = XPMultiplier.Scale(gain, factor)
         parts[#parts + 1] = string.format("%s %+d -> %+d", NameOf(uuid), gain, scaled)
-        if scaled ~= gain then
+        if scaled ~= gain and AddExperience(uuid, scaled - gain) then
             diffs[uuid] = scaled - gain
-            lead = lead or uuid
+            expected[uuid] = expected[uuid] + diffs[uuid]
+            any = true
         end
     end
     gains = {}
     log(string.format("Gain x%s: %s.", XPMultiplier.FormatFactor(factor), table.concat(parts, ", ")))
-    if lead == nil then
-        return
+    if any then
+        pending = { Diffs = diffs, Ticks = XPMultiplier.SettleTicks, Waits = 0 }
     end
-    local leadDiff = diffs[lead]
-    diffs[lead] = nil
-    if AddExperience(lead, leadDiff) then
-        expected[lead] = expected[lead] + leadDiff
-    end
-    batch = { Lead = lead, LeadDiff = leadDiff, Diffs = diffs, Ticks = XPMultiplier.SettleTicks }
 end
 
---- Checks every other member after the lead's correction settled. A member's change since then is the lead's
---- correction (when it reached the whole party) plus any new gain of the game; the lead's own new gain, which reached
---- every member at once, tells the second part.
-local function FinishBatch()
-    local current = batch
-    batch = nil
-    local newGain = gains[current.Lead] or 0
-    local negative = {}
-    if current.LeadDiff < 0 then
-        negative[#negative + 1] = current.Lead
-    end
-    local issued = false
+--- Checks that the corrections arrived, then takes every other change since then as a new gain or loss.
+local function CheckPending()
+    local totals = {}
+    local late = {}
     for uuid in pairs(expected) do
-        if uuid ~= current.Lead then
-            local entity = Entity(uuid)
-            if entity ~= nil then
-                local total = entity.Experience.TotalExperience
-                local extra = total - expected[uuid]
-                local received = extra - newGain == current.LeadDiff
-                local natural = received and extra - current.LeadDiff or extra
-                expected[uuid] = total
-                if natural > 0 then
-                    gains[uuid] = (gains[uuid] or 0) + natural
-                    collectTicks = collectTicks or XPMultiplier.CollectTicks
-                end
-                if received then
-                    SetReach("party")
-                    if current.LeadDiff < 0 then
-                        negative[#negative + 1] = uuid
-                    end
-                else
-                    local diff = current.Diffs[uuid]
-                    if diff ~= nil and AddExperience(uuid, diff) then
-                        expected[uuid] = expected[uuid] + diff
-                        issued = true
-                        SetReach("character")
-                        if diff < 0 then
-                            negative[#negative + 1] = uuid
-                        end
-                    end
-                end
+        local entity = Entity(uuid)
+        if entity ~= nil then
+            totals[uuid] = entity.Experience.TotalExperience
+            local diff = pending.Diffs[uuid]
+            if diff ~= nil and totals[uuid] - expected[uuid] == -diff then
+                late[#late + 1] = uuid
             end
         end
     end
-    if issued then
-        settleTicks = XPMultiplier.SettleTicks
+    if #late > 0 and pending.Waits < XPMultiplier.MaxWaits then
+        pending.Waits = pending.Waits + 1
+        pending.Ticks = XPMultiplier.SettleTicks
+        return
+    end
+    for _, uuid in ipairs(late) do
+        log("The correction for " .. NameOf(uuid) .. " did not arrive in time.")
+    end
+    local negative = {}
+    for uuid, diff in pairs(pending.Diffs) do
+        if diff < 0 then
+            negative[#negative + 1] = uuid
+        end
+    end
+    pending = nil
+    for uuid, total in pairs(totals) do
+        local delta = total - expected[uuid]
+        expected[uuid] = total
+        if delta > 0 then
+            AddGain(uuid, delta)
+        end
     end
     if #negative > 0 then
+        table.sort(negative)
         rebuild = { Uuids = negative, Ticks = XPMultiplier.SettleTicks }
     end
 end
@@ -276,15 +255,11 @@ local function RebuildLevel(uuid)
 end
 
 local function OnTick()
-    if batch ~= nil then
-        batch.Ticks = batch.Ticks - 1
-        if batch.Ticks <= 0 then
-            FinishBatch()
+    if pending ~= nil then
+        pending.Ticks = pending.Ticks - 1
+        if pending.Ticks <= 0 then
+            CheckPending()
         end
-        return
-    end
-    if settleTicks > 0 then
-        settleTicks = settleTicks - 1
         return
     end
     if rebuild ~= nil then
@@ -321,7 +296,7 @@ function XPMultiplier.ReadParty()
     end
 end
 
---- Starts the multiplier once per Lua state. getFactor() returns the setting value; logFn(message) writes a line.
+--- Starts the multiplier once per Lua state. getFactorFn() returns the setting value; logFn(message) writes a line.
 --- Returns true, or false and the error.
 function XPMultiplier.Start(getFactorFn, logFn)
     if started then
@@ -337,7 +312,7 @@ function XPMultiplier.Start(getFactorFn, logFn)
                 log("Could not read a gain: " .. tostring(watchErr))
             end
         end)
-        -- A member that joins can get the party's experience at once: that is no gain to scale.
+        -- A member who joins can get the party's experience at once: that is no gain to scale.
         Ext.Osiris.RegisterListener("CharacterJoinedParty", 1, "after", function(character)
             local entity = Entity(character)
             local uuid = entity and Uuid(entity)

@@ -4,7 +4,6 @@
 Harness.Mods[ModuleUUID] = { Info = { ModVersion = { 1, 0, 0, 0 } } }
 Harness.InstallMCM({ xp_multiplier = 0.5 })
 Harness.ExtraData = { MaxXPLevel = 16, Level1 = 300, Level2 = 600, Level3 = 1800, Level4 = 3800 }
-Harness.ExperienceReach = "character"
 
 -- Level 4 starts at 2700.
 local tav = Harness.Character("Tav", "11111111-1111-1111-1111-111111111111", { Experience = 2600 })
